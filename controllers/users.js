@@ -1,110 +1,98 @@
-import fs from "fs";
-
-import { fileURLToPath } from "url";
-import path from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const raw = fs.readFileSync(path.join(__dirname, "../data/data.json"), "utf8");
-let data = JSON.parse(raw);
+import crypto from "crypto";
+import {
+  getBodyData,
+  getData,
+  saveData,
+  sendResponse,
+} from "../utils/helpers.js";
 
 export const getAllusers = async (req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data.users));
+  try {
+    const data = getData();
+    sendResponse(res, 200, data.users);
+  } catch (err) {
+    sendResponse(res, 500, { message: "Failed to load users" });
+  }
 };
 
 export const getUserById = async (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const user = data.users.find((u) => String(u.id) === String(id));
 
-  const user = data.users.find((u) => u.id === id);
-
-  if (user) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(user));
-  } else {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "User not found" }));
+    if (user) {
+      sendResponse(res, 200, user);
+    } else {
+      sendResponse(res, 404, { message: "User not found" });
+    }
+  } catch (err) {
+    sendResponse(res, 500, { message: "An error occurred" });
   }
 };
 
 export const createUser = async (req, res) => {
-  let body = "";
+  try {
+    const parsed = await getBodyData(req);
+    const data = getData();
 
-  req.on("data", (chunk) => {
-    body += chunk.toString();
-  });
+    if (!parsed.name) {
+      return sendResponse(res, 400, { message: "Name is required" });
+    }
 
-  req.on("end", () => {
-    console.log(JSON.parse(body));
+    const newUser = {
+      ...parsed,
+      id: crypto.randomUUID(),
+    };
 
-    const parsed = JSON.parse(body);
-    parsed.id = crypto.randomUUID();
+    data.users.push(newUser);
+    saveData(data);
 
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "created !", user: parsed }));
-
-    data.users.push(parsed);
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-  });
+    sendResponse(res, 201, { message: "created !", user: newUser });
+  } catch (err) {
+    sendResponse(res, 400, { message: "Invalid JSON or Server Error" });
+  }
 };
 
 export const deleteUser = async (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.users.findIndex((u) => String(u.id) === String(id));
 
-  const userNdx = data.users.findIndex((user) => user.id === id);
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "User not found" });
+    }
 
-  if (userNdx === -1) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "user not found !" }));
-  } else {
-    data.users.slice(userNdx, 1);
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "deleted !" }));
+    data.users.splice(index, 1);
+    saveData(data);
+
+    sendResponse(res, 200, { message: "deleted !" });
+  } catch (err) {
+    sendResponse(res, 500, { message: "Failed to delete user" });
   }
 };
 
 export const updateUser = async (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.users.findIndex((u) => String(u.id) === String(id));
 
-  const userNdx = data.users.findIndex((user) => user.id === id);
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "User not found" });
+    }
 
-  if (userNdx === -1) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "user not found" }));
+    const parsed = await getBodyData(req);
+    data.users[index] = {
+      ...data.users[index],
+      ...parsed,
+      id: data.users[index].id,
+    };
 
-    return;
-  } else {
-    let body = "";
-
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-
-    req.on("end", () => {
-      const parsed = JSON.parse(body);
-
-      data.users[userNdx] = { ...data.users[userNdx], ...parsed };
-
-      fs.writeFileSync(
-        path.join(__dirname, "../data/data.json"),
-        JSON.stringify(data, null, 2),
-      );
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({ message: "updated !", user: data.users[userNdx] }),
-      );
-    });
+    saveData(data);
+    sendResponse(res, 200, { message: "updated !", user: data.users[index] });
+  } catch (err) {
+    sendResponse(res, 400, { message: "Invalid JSON or Update Failed" });
   }
 };

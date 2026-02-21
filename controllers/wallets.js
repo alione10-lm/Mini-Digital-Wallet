@@ -1,203 +1,169 @@
-import fs from "fs";
-
-import { fileURLToPath } from "url";
-import path, { parse } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const raw = fs.readFileSync(path.join(__dirname, "../data/data.json"), "utf8");
-let data = JSON.parse(raw);
+import crypto from "crypto";
+import {
+  getBodyData,
+  getData,
+  saveData,
+  sendResponse,
+} from "../utils/helpers.js";
 
 export const getAllwallets = async (req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data.wallets));
+  try {
+    const data = getData();
+    sendResponse(res, 200, data.wallets);
+  } catch (err) {
+    sendResponse(res, 500, { message: "Failed to load wallets" });
+  }
 };
 
 export const createWallet = async (req, res) => {
-  let body = "";
-
-  req.on("data", (chunk) => {
-    body += chunk.toString();
-  });
-
-  req.on("end", () => {
-    console.log(JSON.parse(body));
-
-    const parsed = JSON.parse(body);
-
-    parsed.wallet_id = crypto.randomUUID();
-    parsed.sold = 0;
+  try {
+    const data = getData();
+    const parsed = await getBodyData(req);
 
     if (!parsed.name || !parsed.user_id) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ message: "all fields are required !" }));
-      return;
+      return sendResponse(res, 400, { message: "all fields are required !" });
     }
 
     if (!data.users.some((u) => u.id === parsed.user_id)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({ message: "invalid id ! no user found with this id " }),
-      );
-      return;
+      return sendResponse(res, 400, { message: "invalid user_id!" });
     }
 
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "created !", wallet: parsed }));
+    const newWallet = {
+      wallet_id: crypto.randomUUID(),
+      name: parsed.name,
+      user_id: parsed.user_id,
+      sold: 0,
+    };
 
-    data.wallets.push(parsed);
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-  });
+    data.wallets.push(newWallet);
+    saveData(data);
+
+    sendResponse(res, 201, { message: "created !", wallet: newWallet });
+  } catch (err) {
+    sendResponse(res, 400, { message: "Invalid JSON or Server Error" });
+  }
 };
 
 export const updateWallet = async (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.wallets.findIndex((w) => w.wallet_id === id);
 
-  const walletNdx = data.wallets.findIndex((wallet) => wallet.id === id);
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "wallet not found" });
+    }
 
-  if (walletNdx === -1) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "wallet not found" }));
-  } else {
-    let body = "";
+    const parsed = await getBodyData(req);
 
-    req.on("data", (chunk) => {
-      body += chunk.toString();
+    data.wallets[index] = { ...data.wallets[index], ...parsed };
+    saveData(data);
+
+    sendResponse(res, 200, {
+      message: "updated !",
+      wallet: data.wallets[index],
     });
-
-    req.on("end", () => {
-      const parsed = JSON.parse(body);
-
-      data.wallets[walletNdx] = { ...data.wallets[walletNdx], ...parsed };
-
-      fs.writeFileSync(
-        path.join(__dirname, "../data/data.json"),
-        JSON.stringify(data, null, 2),
-      );
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          message: "updated !",
-          wallet: data.wallets[walletNdx],
-        }),
-      );
-    });
+  } catch (err) {
+    sendResponse(res, 400, { message: "Update failed" });
   }
 };
 
 export const deleteWallet = async (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.wallets.findIndex((w) => w.wallet_id === id);
 
-  const walletNdx = data.wallets.findIndex((wallet) => wallet.id === id);
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "wallet not found !" });
+    }
 
-  if (walletNdx === -1) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "wallet not found !" }));
-  } else {
-    data.wallets.slice(walletNdx, 1);
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "deleted !" }));
+    data.wallets.splice(index, 1);
+    saveData(data);
+    sendResponse(res, 200, { message: "deleted !" });
+  } catch (err) {
+    sendResponse(res, 500, { message: "Delete failed" });
   }
 };
 
-export const deposit = (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = urlParts[2];
+export const deposit = async (req, res) => {
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.wallets.findIndex((w) => w.wallet_id === id);
 
-  console.log(data.wallets.every((w) => w.wallet_id == id));
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "wallet not found" });
+    }
 
-  // if (data.wallets.some((w) => w.wallet_id !== id)) {
-  //   res.writeHead(200, { "Content-Type": "application/json" });
-  //   res.end(JSON.stringify({ message: "invalid wallet id  !" }));
-  // }
+    const { amount } = await getBodyData(req);
+    data.wallets[index].sold += Number(amount);
 
-  let body = "";
+    const newTransaction = {
+      transaction_id: crypto.randomUUID(),
+      wallet_id: id,
+      amount: Number(amount),
+      type: "DEPOSIT",
+      date: new Date().toISOString(),
+    };
 
-  req.on("data", (chunk) => {
-    body += chunk.toString();
-  });
+    if (!data.transactions) data.transactions = [];
+    data.transactions.push(newTransaction);
 
-  res.on("end", () => {
-    const parsed = JSON.parse(body);
-    console.log(body);
-
-    data.wallets.forEach((wallet) => {
-      wallet.id === id
-        ? { ...wallet, sold: wallet.sold + parsed.amount }
-        : wallet;
+    saveData(data);
+    sendResponse(res, 200, {
+      message: "Deposit successful",
+      wallet: data.wallets[index],
     });
-    console.log(data.wallets);
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        message: "updated !",
-        wallet: data.wallets[walletNdx],
-      }),
-    );
-  });
-
-  fs.writeFileSync(
-    path.join(__dirname, "../data/data.json"),
-    JSON.stringify(data, null, 2),
-  );
+  } catch (err) {
+    sendResponse(res, 400, { message: "Deposit failed" });
+  }
 };
 
-export const withdraw = (req, res) => {
-  const urlParts = req.url.split("/");
-  const id = parseInt(urlParts[2]);
+export const withdraw = async (req, res) => {
+  try {
+    const id = req.url.split("/")[2];
+    const data = getData();
+    const index = data.wallets.findIndex((w) => w.wallet_id === id);
 
-  if (!data.wallets.some((w) => w.id === id)) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "invalid user id  !" }));
-  }
+    if (index === -1) {
+      return sendResponse(res, 404, { message: "wallet not found" });
+    }
 
-  let body = "";
+    const { amount } = await getBodyData(req);
 
-  req.on("data", (chunk) => {
-    body += chunk.toString();
-  });
+    if (data.wallets[index].sold < amount) {
+      return sendResponse(res, 400, { message: "Insufficient balance" });
+    }
 
-  res.on("end", () => {
-    const parsed = JSON.parse(body);
+    data.wallets[index].sold -= Number(amount);
 
-    data.wallets.forEach((wallet) => {
-      wallet.id === id
-        ? { ...wallet, sold: wallet.sold - parsed.amount }
-        : wallet;
+    const newTransaction = {
+      transaction_id: crypto.randomUUID(),
+      wallet_id: id,
+      amount: Number(amount),
+      type: "WITHDRAW",
+      date: new Date().toISOString(),
+    };
+
+    if (!data.transactions) data.transactions = [];
+    data.transactions.push(newTransaction);
+
+    saveData(data);
+    sendResponse(res, 200, {
+      message: "Withdraw successful",
+      wallet: data.wallets[index],
     });
+  } catch (err) {
+    sendResponse(res, 400, { message: "Withdraw failed" });
+  }
+};
 
-    fs.writeFileSync(
-      path.join(__dirname, "../data/data.json"),
-      JSON.stringify(data, null, 2),
-    );
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        message: "updated !",
-        wallet: data.wallets[walletNdx],
-      }),
-    );
-  });
-
-  fs.writeFileSync(
-    path.join(__dirname, "../data/data.json"),
-    JSON.stringify(data, null, 2),
-  );
+export const getAllTransactions = async (req, res) => {
+  try {
+    const data = getData();
+    sendResponse(res, 200, data.transactions || []);
+  } catch (err) {
+    sendResponse(res, 500, { message: "Failed to load transactions" });
+  }
 };
